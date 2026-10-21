@@ -18,3 +18,6 @@ local.properties
 #intellij project files
 *.iml
 *.idea
+
+# web build: heap dumps from the TeaVM compiler
+*.hprof

@@ -46,19 +46,10 @@
 		pointer-events: none;
 		z-index: -1;
 	}
-	/* measures env(safe-area-inset-*) for the game (notches, home indicator) */
-	#insets {
-		position: fixed;
-		inset: 0;
-		visibility: hidden;
-		pointer-events: none;
-		padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
-	}
 </style>
 </head>
 <body oncontextmenu="return false">
 <canvas id="canvas" tabindex="0"></canvas>
-<div id="insets"></div>
 <textarea id="kb" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" aria-hidden="true"></textarea>
 <script>
 // The play page (src/scripts/engines/ember.ts) calls startEmber() with the game's files: the assets
@@ -74,20 +65,10 @@
 	var canvas = $("canvas");
 	var host = {};
 
-	spd.progress = function (done, total) { if (host.onProgress) host.onProgress(done, total); };
+	// the game also asks for spd.exit, setFullscreen, setLandscape and safeInsets if they exist:
+	// none do here, since the page owns the window and full screen
 	spd.loaded = function () { if (host.onReady) host.onReady(); };
 	spd.crash = function (message) { if (host.onCrash) host.onCrash(message); };
-	// the game can't close the page (supportsQuit), nor take full screen (supportsFullScreen)
-	spd.exit = function () { };
-	spd.setFullscreen = function () { };
-	spd.setLandscape = function () { };
-
-	// ---- safe area insets (CSS px: left, top, right, bottom) ------------------------------
-	spd.safeInsets = function () {
-		var cs = getComputedStyle($("insets"));
-		return [parseFloat(cs.paddingLeft) || 0, parseFloat(cs.paddingTop) || 0,
-				parseFloat(cs.paddingRight) || 0, parseFloat(cs.paddingBottom) || 0];
-	};
 
 	// ---- on-screen keyboard for touch devices ---------------------------------------------
 	var kb = $("kb");
@@ -172,6 +153,7 @@
 	var DB_NAME = "shatteredpixeldungeon-files";
 	var WAL = "spd-wal:";
 	var walSeq = Date.now();
+	var version = 0;            // counts the game's writes, so the page reads its files only after a change
 
 	function toBase64(bytes) {
 		var s = "";
@@ -209,6 +191,7 @@
 		var put = IDBObjectStore.prototype.put, del = IDBObjectStore.prototype["delete"];
 		IDBObjectStore.prototype.put = function (value, key) {
 			var request = put.apply(this, arguments);
+			if (isGameDB(this)) version++;
 			if (isGameDB(this) && typeof key === "string") {
 				var entry = { op: "put", type: value && value.type, date: value && value.date ? +value.date : Date.now() };
 				if (value && value.contents) {
@@ -223,6 +206,7 @@
 		};
 		IDBObjectStore.prototype["delete"] = function (key) {
 			var request = del.apply(this, arguments);
+			if (isGameDB(this)) version++;
 			if (isGameDB(this) && typeof key === "string") {
 				var done = walRecord(key, { op: "delete" });
 				if (done) this.transaction.addEventListener("complete", done);
@@ -230,8 +214,8 @@
 			return request;
 		};
 	})();
-	// applies leftover log entries to IndexedDB, then calls back (always, even on errors)
-	function replayWal(callback) {
+	// applies leftover log entries to IndexedDB; resolves either way
+	function replayWal() {
 		var keys = [];
 		try {
 			for (var i = 0; i < localStorage.length; i++) {
@@ -239,41 +223,27 @@
 				if (k && k.indexOf(WAL) === 0) keys.push(k);
 			}
 		} catch (e) { }
-		if (!keys.length || !window.indexedDB) { callback(); return; }
-		var req = indexedDB.open(DB_NAME, 1);
-		req.onupgradeneeded = function () { req.result.createObjectStore("FILE_DATA"); };
-		req.onerror = function () { callback(); };
-		req.onsuccess = function () {
-			var db = req.result;
-			try {
-				var tx = db.transaction("FILE_DATA", "readwrite");
-				var store = tx.objectStore("FILE_DATA");
-				keys.forEach(function (k) {
-					var e = JSON.parse(localStorage.getItem(k));
-					var key = k.substring(WAL.length);
-					if (e.op === "delete") {
-						store["delete"](key);
-					} else {
-						var value = { type: e.type, date: new Date(e.date) };
-						if (e.data !== undefined) {
-							var bytes = fromBase64(e.data);
-							var Kind = window[e.kind] || Int8Array;
-							value.contents = new Kind(bytes.buffer);
-						}
-						store.put(value, key);
+		if (!keys.length) return Promise.resolve();
+		return openDB().then(function (db) {
+			var tx = db.transaction("FILE_DATA", "readwrite"), store = tx.objectStore("FILE_DATA");
+			keys.forEach(function (k) {
+				var e = JSON.parse(localStorage.getItem(k));
+				var key = k.substring(WAL.length);
+				if (e.op === "delete") {
+					store["delete"](key);
+				} else {
+					var value = { type: e.type, date: new Date(e.date) };
+					if (e.data !== undefined) {
+						var Kind = window[e.kind] || Int8Array;
+						value.contents = new Kind(fromBase64(e.data).buffer);
 					}
-				});
-				tx.oncomplete = function () {
-					keys.forEach(function (k) { localStorage.removeItem(k); });
-					db.close();
-					callback();
-				};
-				tx.onerror = tx.onabort = function () { db.close(); callback(); };
-			} catch (e) {
-				db.close();
-				callback();
-			}
-		};
+					store.put(value, key);
+				}
+			});
+			return done(tx).then(function () {
+				keys.forEach(function (k) { localStorage.removeItem(k); });
+			}, function () { }).then(function () { db.close(); });
+		}).catch(function (e) { console.warn("[ember] replay:", e); });
 	}
 
 	// ---- game files from the paks ----------------------------------------------------------
@@ -394,12 +364,6 @@
 	// ---- the player's files ---------------------------------------------------------------
 	// The game keeps its files in IndexedDB (gdx-teavm's FileType.Local) and reads them all once as it
 	// starts. The page hands its kept copy in before that, and reads them back as the game's own save.
-	var version = 0;
-	(function countWrites() {
-		var put = IDBObjectStore.prototype.put, del = IDBObjectStore.prototype["delete"];
-		IDBObjectStore.prototype.put = function () { if (isGameDB(this)) version++; return put.apply(this, arguments); };
-		IDBObjectStore.prototype["delete"] = function () { if (isGameDB(this)) version++; return del.apply(this, arguments); };
-	})();
 	function openDB() {
 		return new Promise(function (resolve, reject) {
 			var req = indexedDB.open(DB_NAME, 1);
@@ -417,11 +381,10 @@
 	// The database keys paths as "/game1/game.dat/"; the page's copy as "game1/game.dat".
 	var toKey = function (p) { return "/" + p + "/"; };
 	var fromKey = function (k) { return String(k).replace(/^\/+|\/+$/g, ""); };
-	// files: [{path, data}], dirs: [path]; replaces everything the game had
+	// files: [{path, data}]; replaces everything the game had, folders made from the paths
 	function writeFiles(saved) {
 		var dirs = {};
-		saved.dirs.forEach(function (p) { dirs[p] = true; });
-		saved.files.forEach(function (f) {
+		saved.forEach(function (f) {
 			var parts = f.path.split("/");
 			for (var i = 1; i < parts.length; i++) dirs[parts.slice(0, i).join("/")] = true;
 		});
@@ -429,7 +392,7 @@
 			var tx = db.transaction("FILE_DATA", "readwrite"), store = tx.objectStore("FILE_DATA");
 			store.clear();
 			Object.keys(dirs).forEach(function (p) { store.put({ type: 1, date: new Date() }, toKey(p)); });
-			saved.files.forEach(function (f) {
+			saved.forEach(function (f) {
 				store.put({ type: 2, date: new Date(), contents: new Int8Array(f.data.buffer, f.data.byteOffset, f.data.byteLength) }, toKey(f.path));
 			});
 			return done(tx).then(function () { db.close(); });
@@ -437,16 +400,15 @@
 	}
 	function readFiles() {
 		return openDB().then(function (db) {
-			var tx = db.transaction("FILE_DATA", "readonly"), out = { files: [], dirs: [] };
+			var tx = db.transaction("FILE_DATA", "readonly"), out = [];
 			var req = tx.objectStore("FILE_DATA").openCursor();
 			req.onsuccess = function () {
 				var c = req.result;
 				if (!c) return;
 				var v = c.value;
-				if (v.type === 1) out.dirs.push(fromKey(c.key));
-				else if (v.contents) {
+				if (v.contents) {
 					var b = v.contents;
-					out.files.push({ path: fromKey(c.key), data: new Uint8Array(b.buffer, b.byteOffset, b.byteLength).slice() });
+					out.push({ path: fromKey(c.key), data: new Uint8Array(b.buffer, b.byteOffset, b.byteLength) });
 				}
 				c["continue"]();
 			};
@@ -455,23 +417,23 @@
 	}
 
 	// ---- start ---------------------------------------------------------------------------
+	// spd.js downloads while the page fetches the paks; main() runs only once startEmber is called
+	var script = new Promise(function (resolve, reject) {
+		var s = document.createElement("script");
+		s.src = "spd.js";
+		s.onload = resolve;
+		s.onerror = function () { reject(new Error("Could not load spd.js")); };
+		document.body.appendChild(s);
+	});
+	script.catch(function () { });
 	window.startEmber = function (opts) {
 		host = opts;
 		spd.language = opts.language;
 		addPak(opts.pak);
 		if (opts.music) streamPak(opts.music); else noMoreFiles();
-		return new Promise(function (resolve, reject) {
-			var s = document.createElement("script");
-			s.src = "spd.js";
-			s.onload = resolve;
-			s.onerror = function () { reject(new Error("Could not load spd.js")); };
-			document.body.appendChild(s);
-		}).then(function () {
-			return opts.saved ? writeFiles(opts.saved) : null;
-		}).then(function () {
-			// writes that never reached IndexedDB are newer than the page's copy
-			return new Promise(function (resolve) { replayWal(resolve); });
-		}).then(function () {
+		var saved = opts.saved ? writeFiles(opts.saved) : Promise.resolve();
+		// writes that never reached IndexedDB are newer than the page's copy, so they go over it
+		return Promise.all([script, saved.then(replayWal)]).then(function () {
 			main([]);
 			canvas.focus();
 			return {

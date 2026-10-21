@@ -186,9 +186,9 @@
 			} catch (e) { }
 		};
 	}
+	// the page's own writes (writeFiles, replayWal) use these and stay out of the log and the count
+	var put = IDBObjectStore.prototype.put, del = IDBObjectStore.prototype["delete"];
 	(function patchIndexedDB() {
-		if (!window.IDBObjectStore) return;
-		var put = IDBObjectStore.prototype.put, del = IDBObjectStore.prototype["delete"];
 		IDBObjectStore.prototype.put = function (value, key) {
 			var request = put.apply(this, arguments);
 			if (isGameDB(this)) version++;
@@ -214,8 +214,7 @@
 			return request;
 		};
 	})();
-	// applies leftover log entries to IndexedDB; resolves either way
-	function replayWal() {
+	function walKeys() {
 		var keys = [];
 		try {
 			for (var i = 0; i < localStorage.length; i++) {
@@ -223,21 +222,31 @@
 				if (k && k.indexOf(WAL) === 0) keys.push(k);
 			}
 		} catch (e) { }
+		return keys;
+	}
+	function dropWal() {
+		walKeys().forEach(function (k) { try { localStorage.removeItem(k); } catch (e) { } });
+	}
+	// applies leftover log entries to IndexedDB; resolves either way
+	function replayWal() {
+		var keys = walKeys();
 		if (!keys.length) return Promise.resolve();
 		return openDB().then(function (db) {
 			var tx = db.transaction("FILE_DATA", "readwrite"), store = tx.objectStore("FILE_DATA");
 			keys.forEach(function (k) {
-				var e = JSON.parse(localStorage.getItem(k));
+				var e;
+				try { e = JSON.parse(localStorage.getItem(k)); } catch (err) { return; }
+				if (!e) return;
 				var key = k.substring(WAL.length);
 				if (e.op === "delete") {
-					store["delete"](key);
+					del.call(store, key);
 				} else {
 					var value = { type: e.type, date: new Date(e.date) };
 					if (e.data !== undefined) {
 						var Kind = window[e.kind] || Int8Array;
 						value.contents = new Kind(fromBase64(e.data).buffer);
 					}
-					store.put(value, key);
+					put.call(store, value, key);
 				}
 			});
 			return done(tx).then(function () {
@@ -307,7 +316,7 @@
 	var RealXHR = window.XMLHttpRequest;
 	function PakXHR() {
 		var xhr = new RealXHR();
-		var path = null, self = this;
+		var path = null, aborted = false, self = this;
 		this._xhr = xhr;
 		this.readyState = 0; this.status = 0; this.response = null; this.responseType = "";
 		var forward = ["load", "error", "abort", "timeout", "progress", "loadend", "readystatechange"];
@@ -331,18 +340,27 @@
 		this.send = function () {
 			if (path === null) { xhr.responseType = self.responseType; xhr.send.apply(xhr, arguments); return; }
 			function answer() {
+				if (aborted) return;
 				var data = files.get(path);
 				self.readyState = 4;
 				self.status = data ? 200 : 404;
 				self.response = data ? data.slice().buffer : null;
 				self._fire("readystatechange");
-				self._fire(data ? "load" : "error");
+				self._fire("load");
 				self._fire("loadend");
 			}
 			if (files.has(path) || musicDone || path.indexOf("music/") !== 0) setTimeout(answer, 0);
 			else { if (!waiting.has(path)) waiting.set(path, []); waiting.get(path).push(answer); }
 		};
-		this.abort = function () { if (path === null) xhr.abort(); };
+		this.abort = function () {
+			if (path === null) { xhr.abort(); return; }
+			if (aborted || self.readyState === 4) return;
+			aborted = true;
+			self.readyState = 4;
+			self._fire("readystatechange");
+			self._fire("abort");
+			self._fire("loadend");
+		};
 		this.setRequestHeader = function () { if (path === null) xhr.setRequestHeader.apply(xhr, arguments); };
 		this.overrideMimeType = function () { if (path === null) xhr.overrideMimeType.apply(xhr, arguments); };
 		this.getResponseHeader = function (h) { return path === null ? xhr.getResponseHeader(h) : null; };
@@ -391,11 +409,24 @@
 		return openDB().then(function (db) {
 			var tx = db.transaction("FILE_DATA", "readwrite"), store = tx.objectStore("FILE_DATA");
 			store.clear();
-			Object.keys(dirs).forEach(function (p) { store.put({ type: 1, date: new Date() }, toKey(p)); });
+			Object.keys(dirs).forEach(function (p) { put.call(store, { type: 1, date: new Date() }, toKey(p)); });
 			saved.forEach(function (f) {
-				store.put({ type: 2, date: new Date(), contents: new Int8Array(f.data.buffer, f.data.byteOffset, f.data.byteLength) }, toKey(f.path));
+				put.call(store, { type: 2, date: new Date(), contents: new Int8Array(f.data.buffer, f.data.byteOffset, f.data.byteLength) }, toKey(f.path));
 			});
 			return done(tx).then(function () { db.close(); });
+		});
+	}
+	function hasFiles() {
+		return openDB().then(function (db) {
+			var tx = db.transaction("FILE_DATA", "readonly"), found = false;
+			var req = tx.objectStore("FILE_DATA").openCursor();
+			req.onsuccess = function () {
+				var c = req.result;
+				if (!c) return;
+				if (c.value.contents) found = true;
+				else c["continue"]();
+			};
+			return done(tx).then(function () { db.close(); return found; });
 		});
 	}
 	function readFiles() {
@@ -431,12 +462,22 @@
 		spd.language = opts.language;
 		addPak(opts.pak);
 		if (opts.music) streamPak(opts.music); else noMoreFiles();
-		var saved = opts.saved ? writeFiles(opts.saved) : Promise.resolve();
-		// writes that never reached IndexedDB are newer than the page's copy, so they go over it
-		return Promise.all([script, saved.then(replayWal)]).then(function () {
+		// The page's copy goes in when it came from elsewhere (an import, another device) or the game's
+		// files are gone; then the log of writes made here is older and goes too. Otherwise the database is
+		// as new as the copy or newer (the game also saves as the page closes), and the log goes over it.
+		var write = !opts.saved ? Promise.resolve(false)
+			: opts.foreign ? Promise.resolve(true)
+			: hasFiles().then(function (has) { return !has; });
+		var wrote = write.then(function (yes) {
+			if (!yes) return replayWal().then(function () { return false; });
+			dropWal();
+			return writeFiles(opts.saved).then(function () { return true; });
+		});
+		return Promise.all([script, wrote]).then(function (r) {
 			main([]);
 			canvas.focus();
 			return {
+				wrote: r[1],
 				version: function () { return version; },
 				files: readFiles,
 				setMuted: function (m) { if (window.Howler) Howler.mute(m); },

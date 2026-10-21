@@ -73,10 +73,10 @@ public class ShatteredPixelDungeon extends Game {
 
 	@Override
 	public void finish() {
-		if (!DeviceCompat.isiOS()) {
+		if (!DeviceCompat.isiOS() && platform.ownsWindow()) {
 			super.finish();
 		} else {
-			//can't exit on iOS (Apple guidelines), so just go to title screen
+			//can't exit on iOS (Apple guidelines), or a browser page, so just go to title screen
 			switchScene(TitleScene.class);
 		}
 	}

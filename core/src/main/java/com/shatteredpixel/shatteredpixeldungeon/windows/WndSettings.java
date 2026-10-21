@@ -255,9 +255,9 @@ public class WndSettings extends WndTabbed {
 				chkFullscreen.checked(true);
 				chkFullscreen.enable(false);
 			}
-			add(chkFullscreen);
+			if (Game.platform.ownsWindow()) add(chkFullscreen);
 
-			if (DeviceCompat.isAndroid()) {
+			if (DeviceCompat.isAndroid() && Game.platform.ownsWindow()) {
 				chkLandscape = new CheckBox(Messages.get(this, "landscape")) {
 					@Override
 					protected void onClick() {
@@ -325,8 +325,10 @@ public class WndSettings extends WndTabbed {
 
 			bottom = sep1.y + 1;
 
-			chkFullscreen.setRect(0, bottom + GAP, width, BTN_HEIGHT);
-			bottom = chkFullscreen.bottom();
+			if (chkFullscreen.parent != null) {
+				chkFullscreen.setRect(0, bottom + GAP, width, BTN_HEIGHT);
+				bottom = chkFullscreen.bottom();
+			}
 
 			if (chkLandscape != null) {
 				chkLandscape.setRect(0, bottom + GAP, width, BTN_HEIGHT);

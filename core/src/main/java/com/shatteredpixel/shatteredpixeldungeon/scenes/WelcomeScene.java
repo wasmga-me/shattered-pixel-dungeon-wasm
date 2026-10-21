@@ -116,13 +116,6 @@ public class WelcomeScene extends PixelScene {
 
 		align(title);
 
-		if (landscape()){
-			placeTorch(title.x + 30, title.y + 35);
-			placeTorch(title.x + title.width - 30, title.y + 35);
-		} else {
-			placeTorch(title.x + 16, title.y + 70);
-			placeTorch(title.x + title.width - 16, title.y + 70);
-		}
 
 		Image signs = new Image(BannerSprites.get( landscape() ? BannerSprites.Type.TITLE_GLOW_LAND : BannerSprites.Type.TITLE_GLOW_PORT)){
 			private float time = 0;
@@ -142,6 +135,10 @@ public class WelcomeScene extends PixelScene {
 		signs.x = title.x + (title.width() - signs.width())/2f;
 		signs.y = title.y;
 		add( signs );
+
+		//renamed version: the name in place of the banner and its torches (see GameName)
+		title.visible = signs.visible = false;
+		GameName.add(this, title, landscape());
 		
 		StyledButton okay = new StyledButton(Chrome.Type.GREY_BUTTON_TR, Messages.get(this, "continue")){
 			@Override

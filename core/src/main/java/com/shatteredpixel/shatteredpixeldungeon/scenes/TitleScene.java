@@ -39,6 +39,7 @@ import com.shatteredpixel.shatteredpixeldungeon.sprites.CharSprite;
 import com.shatteredpixel.shatteredpixeldungeon.ui.ExitButton;
 import com.shatteredpixel.shatteredpixeldungeon.ui.IconButton;
 import com.shatteredpixel.shatteredpixeldungeon.ui.Icons;
+import com.shatteredpixel.shatteredpixeldungeon.ui.RenderedTextBlock;
 import com.shatteredpixel.shatteredpixeldungeon.ui.StyledButton;
 import com.shatteredpixel.shatteredpixeldungeon.ui.TitleBackground;
 import com.shatteredpixel.shatteredpixeldungeon.ui.Window;
@@ -67,6 +68,7 @@ public class TitleScene extends PixelScene {
 	private Fireball leftFB;
 	private Fireball rightFB;
 	private Image signs;
+	private RenderedTextBlock name;
 
 	private StyledButton btnPlay;
 	private StyledButton btnSupport;
@@ -141,6 +143,10 @@ public class TitleScene extends PixelScene {
 		signs.x = title.x + (title.width() - signs.width())/2f;
 		signs.y = title.y;
 		add( signs );
+
+		//renamed version: the name in place of the banner (see GameName)
+		title.visible = signs.visible = leftFB.visible = rightFB.visible = false;
+		name = GameName.add(this, title, landscape());
 
 		final Chrome.Type GREY_TR = Chrome.Type.GREY_BUTTON_TR;
 		
@@ -242,6 +248,20 @@ public class TitleScene extends PixelScene {
 			btnAbout.setRect(btnSettings.right()+2, btnSettings.top(), btnSettings.width(), BTN_HEIGHT);
 		}
 
+		//no news without a news service (the browser build): its place goes to the other buttons
+		if (!News.supportsNews()){
+			remove(btnNews);
+			if (landscape()) {
+				btnChanges.setRect(btnJournal.right()+2, btnJournal.top(), btnRankings.width(), BTN_HEIGHT);
+				btnSettings.setRect(btnPlay.left(), btnRankings.bottom() + GAP, btnPlay.width(), BTN_HEIGHT);
+				btnAbout.setRect(btnSupport.left(), btnSettings.top(), btnSupport.width(), BTN_HEIGHT);
+			} else {
+				btnChanges.setRect(btnRankings.left(), btnRankings.bottom()+ GAP, btnRankings.width(), BTN_HEIGHT);
+				btnSettings.setRect(btnJournal.left(), btnChanges.top(), btnJournal.width(), BTN_HEIGHT);
+				btnAbout.setRect(btnPlay.left(), btnChanges.bottom()+GAP, btnPlay.width(), BTN_HEIGHT);
+			}
+		}
+
 		version = new BitmapText( "v" + Game.version, pixelFont);
 		version.measure();
 		version.hardlight( 0x888888 );
@@ -289,7 +309,7 @@ public class TitleScene extends PixelScene {
 		};
 		add(fadeResetter);
 
-		if (DeviceCompat.isDesktop()) {
+		if (DeviceCompat.isDesktop() && Game.platform.ownsWindow()) {
 			btnExit = new ExitButton();
 			btnExit.setPos( w - btnExit.width(), 0 );
 			add( btnExit );
@@ -313,6 +333,7 @@ public class TitleScene extends PixelScene {
 		leftFB.am = alpha;
 		rightFB.am = alpha;
 		//signs.am = alpha; handles this itself
+		name.alpha(alpha);
 
 		btnPlay.enable(alpha != 0);
 		btnSupport.enable(alpha != 0);

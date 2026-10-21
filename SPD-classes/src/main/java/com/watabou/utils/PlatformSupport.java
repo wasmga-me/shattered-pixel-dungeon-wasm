@@ -40,6 +40,11 @@ public abstract class PlatformSupport {
 		return true; //default
 	}
 
+	//whether the game owns its window: closes it, takes it full screen and turns it (a page in a frame can't)
+	public boolean ownsWindow(){
+		return true; //default
+	}
+
 	public static final int INSET_ALL = 3; //All insets, from hole punches to nav bars
 	public static final int INSET_LRG = 2; //Only big insets, full size notches and nav bars
 	public static final int INSET_BLK = 1; //only complete blocker assets like navbars

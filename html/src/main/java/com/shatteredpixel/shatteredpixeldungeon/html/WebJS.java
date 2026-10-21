@@ -61,7 +61,7 @@ public class WebJS {
 			+ " || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);")
 	public static native boolean isIOS();
 
-	@JSBody(script = "return navigator.language || (navigator.languages && navigator.languages[0]) || 'en';")
+	@JSBody(script = "return (window.spd && window.spd.language) || navigator.language || (navigator.languages && navigator.languages[0]) || 'en';")
 	public static native String browserLanguage();
 
 	@JSBody(script = "return /Android/i.test(navigator.userAgent);")

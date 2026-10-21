@@ -57,7 +57,13 @@ public class WebPlatformSupport extends PlatformSupport {
 
 	@Override
 	public boolean supportsFullScreen() {
-		return WebJS.fullscreenSupported();
+		//the play page's button owns full screen
+		return false;
+	}
+
+	@Override
+	public boolean ownsWindow() {
+		return false;
 	}
 
 	@Override

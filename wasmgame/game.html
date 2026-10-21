@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<!--
+  Ember Pixel Dungeon, the browser build of Shattered Pixel Dungeon v4.0.2 that wasmga.me plays in a frame.
+  Shattered Pixel Dungeon Copyright (C) 2014-2026 Evan Debenham, based on Pixel Dungeon, Copyright (C) 2012-2015
+  Oleg Dolya (Watabou). The browser build is from goddeaterr/web-pixeldungeon. GNU GPL v3, see LICENSE.txt.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Ember Pixel Dungeon</title>
+<style>
+	html, body {
+		margin: 0;
+		padding: 0;
+		width: 100%;
+		height: 100%;
+		background: #000;
+		overflow: hidden;
+		overscroll-behavior: none;
+		-webkit-user-select: none;
+		user-select: none;
+		-webkit-touch-callout: none;
+		-webkit-tap-highlight-color: transparent;
+	}
+	#canvas {
+		position: fixed;
+		left: 0;
+		top: 0;
+		display: block;
+		border: none;
+		outline: none;
+		touch-action: none;
+		image-rendering: pixelated;
+	}
+	/* hidden text field that brings up the on-screen keyboard on touch devices */
+	#kb {
+		position: fixed;
+		left: 0;
+		bottom: 0;
+		width: 1px;
+		height: 1px;
+		opacity: 0;
+		border: 0;
+		padding: 0;
+		font-size: 16px; /* prevents iOS from zooming in when focused */
+		pointer-events: none;
+		z-index: -1;
+	}
+	/* measures env(safe-area-inset-*) for the game (notches, home indicator) */
+	#insets {
+		position: fixed;
+		inset: 0;
+		visibility: hidden;
+		pointer-events: none;
+		padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+	}
+</style>
+</head>
+<body oncontextmenu="return false">
+<canvas id="canvas" tabindex="0"></canvas>
+<div id="insets"></div>
+<textarea id="kb" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" aria-hidden="true"></textarea>
+<script>
+// The play page (src/scripts/engines/ember.ts) calls startEmber() with the game's files: the assets
+// pak, the URL of the music pak, the saved game files and callbacks. Game files the game asks for
+// under assets/ come from the paks; spd.js and its scripts come from this folder.
+(function () {
+	"use strict";
+
+	var spd = window.spd = window.spd || {};
+	// where the game finds scripts/ (WebBaseUrl.java): this folder
+	window.SPD_BASE = "./";
+	var $ = function (id) { return document.getElementById(id); };
+	var canvas = $("canvas");
+	var host = {};
+
+	spd.progress = function (done, total) { if (host.onProgress) host.onProgress(done, total); };
+	spd.loaded = function () { if (host.onReady) host.onReady(); };
+	spd.crash = function (message) { if (host.onCrash) host.onCrash(message); };
+	// the game can't close the page (supportsQuit), nor take full screen (supportsFullScreen)
+	spd.exit = function () { };
+	spd.setFullscreen = function () { };
+	spd.setLandscape = function () { };
+
+	// ---- safe area insets (CSS px: left, top, right, bottom) ------------------------------
+	spd.safeInsets = function () {
+		var cs = getComputedStyle($("insets"));
+		return [parseFloat(cs.paddingLeft) || 0, parseFloat(cs.paddingTop) || 0,
+				parseFloat(cs.paddingRight) || 0, parseFloat(cs.paddingBottom) || 0];
+	};
+
+	// ---- on-screen keyboard for touch devices ---------------------------------------------
+	var kb = $("kb");
+	var kbWanted = false;
+	var isTouch = ("ontouchstart" in window) || navigator.maxTouchPoints > 0;
+	spd.keyboard = function (visible, multiline) {
+		if (!isTouch) return;
+		kbWanted = visible;
+		if (visible) {
+			kb.value = "";
+			try { kb.focus({ preventScroll: true }); } catch (e) { }
+		} else {
+			kb.blur();
+		}
+	};
+	function sendChar(c) {
+		if (spd.onKeyboardChar) spd.onKeyboardChar(c);
+	}
+	// the field is kept empty: every insertion/deletion is forwarded as typed characters
+	kb.addEventListener("beforeinput", function (e) {
+		var t = e.inputType || "";
+		if (t.indexOf("delete") === 0) {
+			sendChar(8);
+		} else if (t === "insertLineBreak" || t === "insertParagraph") {
+			sendChar(10);
+		} else if (e.data) {
+			for (var i = 0; i < e.data.length; i++) sendChar(e.data.charCodeAt(i));
+		}
+		e.preventDefault();
+	});
+	// fallback for browsers without beforeinput support
+	kb.addEventListener("input", function () {
+		var v = kb.value;
+		for (var i = 0; i < v.length; i++) sendChar(v.charCodeAt(i) === 10 ? 10 : v.charCodeAt(i));
+		kb.value = "";
+	});
+	// keys typed into the hidden field must not also reach the game's keyboard handler
+	["keydown", "keyup", "keypress"].forEach(function (type) {
+		kb.addEventListener(type, function (e) {
+			e.stopPropagation();
+			if (type === "keydown" && (e.key === "Backspace" || e.key === "Enter") && e.keyCode !== 229 && !e.isComposing) {
+				// hardware keys on a touch device: handled here since beforeinput may not fire for them
+				sendChar(e.key === "Backspace" ? 8 : 10);
+				e.preventDefault();
+			}
+		});
+	});
+
+	// ---- user gestures: audio unlock and keyboard focus --------------
+	function onGesture() {
+		// Howler unlocks itself on the first interaction too; this also covers a context that
+		// the browser suspended again later (e.g. iOS after switching apps)
+		try {
+			if (window.Howler && Howler.ctx && Howler.ctx.state !== "running") Howler.ctx.resume();
+		} catch (e) { }
+		if (kbWanted && document.activeElement !== kb) {
+			try { kb.focus({ preventScroll: true }); } catch (e) { }
+		}
+	}
+	["pointerup", "touchend", "keydown", "mousedown"].forEach(function (type) {
+		window.addEventListener(type, onGesture, { passive: true, capture: true });
+	});
+
+	// stop page scrolling / pinch zoom / iOS rubber banding on the game surface
+	document.addEventListener("touchmove", function (e) { if (e.target === canvas) e.preventDefault(); }, { passive: false });
+	document.addEventListener("gesturestart", function (e) { e.preventDefault(); });
+	// browser shortcuts that clash with game key bindings (scrolling with space/arrows, tab focus change...)
+	window.addEventListener("keydown", function (e) {
+		if (e.target === kb) return;
+		if (["Space", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Tab", "Backspace",
+			 "PageUp", "PageDown", "Home", "End"].indexOf(e.code) >= 0) {
+			e.preventDefault();
+		}
+	});
+
+	// ---- save durability: write-ahead log for IndexedDB ------------------------------------
+	// Game files (saves, badges, rankings, journal) live in IndexedDB. The game saves when it is paused,
+	// which on the web happens in visibilitychange/pagehide while the tab is being closed or reloaded,
+	// and browsers may drop IndexedDB transactions that are still in flight at that point.
+	// Every write/delete to the game's database is therefore also recorded synchronously in
+	// localStorage, removed once IndexedDB confirms it, and replayed on the next start if it never landed.
+	var DB_NAME = "shatteredpixeldungeon-files";
+	var WAL = "spd-wal:";
+	var walSeq = Date.now();
+
+	function toBase64(bytes) {
+		var s = "";
+		for (var i = 0; i < bytes.length; i += 0x8000) {
+			s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+		}
+		return btoa(s);
+	}
+	function fromBase64(str) {
+		var s = atob(str), bytes = new Uint8Array(s.length);
+		for (var i = 0; i < s.length; i++) bytes[i] = s.charCodeAt(i);
+		return bytes;
+	}
+	function isGameDB(store) {
+		try { return store.transaction.db.name === DB_NAME; } catch (e) { return false; }
+	}
+	function walRecord(key, entry) {
+		var id = WAL + key;
+		var seq = ++walSeq;
+		entry.seq = seq;
+		try {
+			localStorage.setItem(id, JSON.stringify(entry));
+		} catch (e) {
+			return null; // storage full: IndexedDB alone will have to do
+		}
+		return function () {
+			try {
+				var cur = localStorage.getItem(id);
+				if (cur && JSON.parse(cur).seq === seq) localStorage.removeItem(id);
+			} catch (e) { }
+		};
+	}
+	(function patchIndexedDB() {
+		if (!window.IDBObjectStore) return;
+		var put = IDBObjectStore.prototype.put, del = IDBObjectStore.prototype["delete"];
+		IDBObjectStore.prototype.put = function (value, key) {
+			var request = put.apply(this, arguments);
+			if (isGameDB(this) && typeof key === "string") {
+				var entry = { op: "put", type: value && value.type, date: value && value.date ? +value.date : Date.now() };
+				if (value && value.contents) {
+					var c = value.contents;
+					entry.kind = c.constructor && c.constructor.name;
+					entry.data = toBase64(new Uint8Array(c.buffer, c.byteOffset, c.byteLength));
+				}
+				var done = walRecord(key, entry);
+				if (done) this.transaction.addEventListener("complete", done);
+			}
+			return request;
+		};
+		IDBObjectStore.prototype["delete"] = function (key) {
+			var request = del.apply(this, arguments);
+			if (isGameDB(this) && typeof key === "string") {
+				var done = walRecord(key, { op: "delete" });
+				if (done) this.transaction.addEventListener("complete", done);
+			}
+			return request;
+		};
+	})();
+	// applies leftover log entries to IndexedDB, then calls back (always, even on errors)
+	function replayWal(callback) {
+		var keys = [];
+		try {
+			for (var i = 0; i < localStorage.length; i++) {
+				var k = localStorage.key(i);
+				if (k && k.indexOf(WAL) === 0) keys.push(k);
+			}
+		} catch (e) { }
+		if (!keys.length || !window.indexedDB) { callback(); return; }
+		var req = indexedDB.open(DB_NAME, 1);
+		req.onupgradeneeded = function () { req.result.createObjectStore("FILE_DATA"); };
+		req.onerror = function () { callback(); };
+		req.onsuccess = function () {
+			var db = req.result;
+			try {
+				var tx = db.transaction("FILE_DATA", "readwrite");
+				var store = tx.objectStore("FILE_DATA");
+				keys.forEach(function (k) {
+					var e = JSON.parse(localStorage.getItem(k));
+					var key = k.substring(WAL.length);
+					if (e.op === "delete") {
+						store["delete"](key);
+					} else {
+						var value = { type: e.type, date: new Date(e.date) };
+						if (e.data !== undefined) {
+							var bytes = fromBase64(e.data);
+							var Kind = window[e.kind] || Int8Array;
+							value.contents = new Kind(bytes.buffer);
+						}
+						store.put(value, key);
+					}
+				});
+				tx.oncomplete = function () {
+					keys.forEach(function (k) { localStorage.removeItem(k); });
+					db.close();
+					callback();
+				};
+				tx.onerror = tx.onabort = function () { db.close(); callback(); };
+			} catch (e) {
+				db.close();
+				callback();
+			}
+		};
+	}
+
+	// ---- game files from the paks ----------------------------------------------------------
+	// A pak is a 4 byte header length, a JSON list of [path, size] and the files' bytes in that order.
+	var files = new Map();      // path under assets/ -> Uint8Array
+	var waiting = new Map();    // path -> callbacks for files still on their way (music)
+	var musicDone = false;
+	function readHeader(buf, length) {
+		if (length < 4) return null;
+		var headLen = new DataView(buf.buffer, buf.byteOffset).getUint32(0, true);
+		if (length < 4 + headLen) return null;
+		return { list: JSON.parse(new TextDecoder().decode(buf.subarray(4, 4 + headLen))), start: 4 + headLen };
+	}
+	function addFile(path, data) {
+		files.set(path, data);
+		var cbs = waiting.get(path);
+		if (cbs) { waiting.delete(path); cbs.forEach(function (cb) { cb(); }); }
+	}
+	function addPak(buf) {
+		var h = readHeader(buf, buf.length), off = h.start;
+		h.list.forEach(function (e) { addFile(e[0], buf.subarray(off, off + e[1])); off += e[1]; });
+	}
+	function noMoreFiles() {
+		musicDone = true;
+		waiting.forEach(function (cbs) { cbs.forEach(function (cb) { cb(); }); });
+		waiting.clear();
+	}
+	// Downloads the music pak and hands over each track as soon as its bytes are in.
+	function streamPak(url) {
+		fetch(url).then(function (res) {
+			if (!res.ok) throw new Error(url + ": " + res.status);
+			var reader = res.body.getReader();
+			var buf = new Uint8Array(1 << 20), length = 0, header = null, next = 0, off = 0;
+			function pump() {
+				return reader.read().then(function (r) {
+					if (r.done) { noMoreFiles(); return; }
+					var v = r.value;
+					if (length + v.length > buf.length) {
+						var grown = new Uint8Array(Math.max(buf.length * 2, length + v.length));
+						grown.set(buf.subarray(0, length));
+						buf = grown;
+					}
+					buf.set(v, length);
+					length += v.length;
+					if (!header && (header = readHeader(buf, length))) off = header.start;
+					while (header && next < header.list.length && off + header.list[next][1] <= length) {
+						var e = header.list[next++];
+						addFile(e[0], buf.slice(off, off + e[1]));
+						off += e[1];
+					}
+					return pump();
+				});
+			}
+			return pump();
+		}).catch(function (e) { console.warn("[ember] music:", e); noMoreFiles(); });
+	}
+
+	// gdx-teavm downloads each asset with XMLHttpRequest from <this folder>assets/<path>:
+	// those requests are answered from the paks.
+	var assetBase = new URL("assets/", document.baseURI).href;
+	var RealXHR = window.XMLHttpRequest;
+	function PakXHR() {
+		var xhr = new RealXHR();
+		var path = null, self = this;
+		this._xhr = xhr;
+		this.readyState = 0; this.status = 0; this.response = null; this.responseType = "";
+		var forward = ["load", "error", "abort", "timeout", "progress", "loadend", "readystatechange"];
+		forward.forEach(function (type) {
+			xhr.addEventListener(type, function () {
+				if (path !== null) return;
+				self.readyState = xhr.readyState;
+				if (xhr.readyState === 4) { self.status = xhr.status; self.response = xhr.response; }
+				self._fire(type);
+			});
+		});
+		this.open = function (method, url, async) {
+			var abs = new URL(url, document.baseURI).href;
+			if (abs.indexOf(assetBase) === 0) {
+				path = decodeURIComponent(abs.slice(assetBase.length).split("?")[0]);
+			} else {
+				xhr.open.apply(xhr, arguments);
+			}
+			self.readyState = 1;
+		};
+		this.send = function () {
+			if (path === null) { xhr.responseType = self.responseType; xhr.send.apply(xhr, arguments); return; }
+			function answer() {
+				var data = files.get(path);
+				self.readyState = 4;
+				self.status = data ? 200 : 404;
+				self.response = data ? data.slice().buffer : null;
+				self._fire("readystatechange");
+				self._fire(data ? "load" : "error");
+				self._fire("loadend");
+			}
+			if (files.has(path) || musicDone || path.indexOf("music/") !== 0) setTimeout(answer, 0);
+			else { if (!waiting.has(path)) waiting.set(path, []); waiting.get(path).push(answer); }
+		};
+		this.abort = function () { if (path === null) xhr.abort(); };
+		this.setRequestHeader = function () { if (path === null) xhr.setRequestHeader.apply(xhr, arguments); };
+		this.overrideMimeType = function () { if (path === null) xhr.overrideMimeType.apply(xhr, arguments); };
+		this.getResponseHeader = function (h) { return path === null ? xhr.getResponseHeader(h) : null; };
+		this.getAllResponseHeaders = function () { return path === null ? xhr.getAllResponseHeaders() : ""; };
+		this._listeners = {};
+	}
+	PakXHR.prototype.addEventListener = function (type, cb) { (this._listeners[type] = this._listeners[type] || []).push(cb); };
+	PakXHR.prototype.removeEventListener = function (type, cb) {
+		var l = this._listeners[type]; if (l) this._listeners[type] = l.filter(function (f) { return f !== cb; });
+	};
+	PakXHR.prototype._fire = function (type) {
+		var ev = { type: type, target: this, loaded: 0, total: 0, lengthComputable: false };
+		if (typeof this["on" + type] === "function") this["on" + type](ev);
+		(this._listeners[type] || []).slice().forEach(function (cb) { cb.call(this, ev); }, this);
+	};
+	PakXHR.DONE = 4;
+	window.XMLHttpRequest = PakXHR;
+
+	// ---- the player's files ---------------------------------------------------------------
+	// The game keeps its files in IndexedDB (gdx-teavm's FileType.Local) and reads them all once as it
+	// starts. The page hands its kept copy in before that, and reads them back as the game's own save.
+	var version = 0;
+	(function countWrites() {
+		var put = IDBObjectStore.prototype.put, del = IDBObjectStore.prototype["delete"];
+		IDBObjectStore.prototype.put = function () { if (isGameDB(this)) version++; return put.apply(this, arguments); };
+		IDBObjectStore.prototype["delete"] = function () { if (isGameDB(this)) version++; return del.apply(this, arguments); };
+	})();
+	function openDB() {
+		return new Promise(function (resolve, reject) {
+			var req = indexedDB.open(DB_NAME, 1);
+			req.onupgradeneeded = function () { req.result.createObjectStore("FILE_DATA"); };
+			req.onerror = function () { reject(req.error); };
+			req.onsuccess = function () { resolve(req.result); };
+		});
+	}
+	function done(tx) {
+		return new Promise(function (resolve, reject) {
+			tx.oncomplete = function () { resolve(); };
+			tx.onerror = tx.onabort = function () { reject(tx.error); };
+		});
+	}
+	// The database keys paths as "/game1/game.dat/"; the page's copy as "game1/game.dat".
+	var toKey = function (p) { return "/" + p + "/"; };
+	var fromKey = function (k) { return String(k).replace(/^\/+|\/+$/g, ""); };
+	// files: [{path, data}], dirs: [path]; replaces everything the game had
+	function writeFiles(saved) {
+		var dirs = {};
+		saved.dirs.forEach(function (p) { dirs[p] = true; });
+		saved.files.forEach(function (f) {
+			var parts = f.path.split("/");
+			for (var i = 1; i < parts.length; i++) dirs[parts.slice(0, i).join("/")] = true;
+		});
+		return openDB().then(function (db) {
+			var tx = db.transaction("FILE_DATA", "readwrite"), store = tx.objectStore("FILE_DATA");
+			store.clear();
+			Object.keys(dirs).forEach(function (p) { store.put({ type: 1, date: new Date() }, toKey(p)); });
+			saved.files.forEach(function (f) {
+				store.put({ type: 2, date: new Date(), contents: new Int8Array(f.data.buffer, f.data.byteOffset, f.data.byteLength) }, toKey(f.path));
+			});
+			return done(tx).then(function () { db.close(); });
+		});
+	}
+	function readFiles() {
+		return openDB().then(function (db) {
+			var tx = db.transaction("FILE_DATA", "readonly"), out = { files: [], dirs: [] };
+			var req = tx.objectStore("FILE_DATA").openCursor();
+			req.onsuccess = function () {
+				var c = req.result;
+				if (!c) return;
+				var v = c.value;
+				if (v.type === 1) out.dirs.push(fromKey(c.key));
+				else if (v.contents) {
+					var b = v.contents;
+					out.files.push({ path: fromKey(c.key), data: new Uint8Array(b.buffer, b.byteOffset, b.byteLength).slice() });
+				}
+				c["continue"]();
+			};
+			return done(tx).then(function () { db.close(); return out; });
+		});
+	}
+
+	// ---- start ---------------------------------------------------------------------------
+	window.startEmber = function (opts) {
+		host = opts;
+		spd.language = opts.language;
+		addPak(opts.pak);
+		if (opts.music) streamPak(opts.music); else noMoreFiles();
+		return new Promise(function (resolve, reject) {
+			var s = document.createElement("script");
+			s.src = "spd.js";
+			s.onload = resolve;
+			s.onerror = function () { reject(new Error("Could not load spd.js")); };
+			document.body.appendChild(s);
+		}).then(function () {
+			return opts.saved ? writeFiles(opts.saved) : null;
+		}).then(function () {
+			// writes that never reached IndexedDB are newer than the page's copy
+			return new Promise(function (resolve) { replayWal(resolve); });
+		}).then(function () {
+			main([]);
+			canvas.focus();
+			return {
+				version: function () { return version; },
+				files: readFiles,
+				setMuted: function (m) { if (window.Howler) Howler.mute(m); },
+			};
+		});
+	};
+})();
+</script>
+</body>
+</html>

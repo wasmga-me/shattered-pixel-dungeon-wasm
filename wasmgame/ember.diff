@@ -1,0 +1,273 @@
+diff --git a/SPD-classes/src/main/java/com/watabou/utils/PlatformSupport.java b/SPD-classes/src/main/java/com/watabou/utils/PlatformSupport.java
+index 863b15b..4ffc15b 100644
+--- a/SPD-classes/src/main/java/com/watabou/utils/PlatformSupport.java
++++ b/SPD-classes/src/main/java/com/watabou/utils/PlatformSupport.java
+@@ -40,6 +40,11 @@ public abstract class PlatformSupport {
+ 		return true; //default
+ 	}
+ 
++	//whether the game owns its window: closes it, takes it full screen and turns it (a page in a frame can't)
++	public boolean ownsWindow(){
++		return true; //default
++	}
++
+ 	public static final int INSET_ALL = 3; //All insets, from hole punches to nav bars
+ 	public static final int INSET_LRG = 2; //Only big insets, full size notches and nav bars
+ 	public static final int INSET_BLK = 1; //only complete blocker assets like navbars
+diff --git a/core/src/main/assets/messages/scenes/scenes.properties b/core/src/main/assets/messages/scenes/scenes.properties
+index b899063..86cff9c 100644
+--- a/core/src/main/assets/messages/scenes/scenes.properties
++++ b/core/src/main/assets/messages/scenes/scenes.properties
+@@ -145,19 +145,19 @@ scenes.titlescene$changesbutton.changes=Current Changes Screen
+ scenes.titlescene.patreon_body=Shattered Pixel Dungeon is a completely free game, which means that I depend on support from generous players in order to keep making it.\n\nIf you're interested in supporting me, the best way to do so is through Patreon. Patreon gives me a consistent income source, and allows me to give something back to those who support me!\n\nPatrons get exclusive blog posts every week which let them know about what I'm working on before anyone else!\n\nYou can take a look at my Patreon page for the most up to date information about benefits, Thank you for your consideration!\n\n(Patreon rewards are only available in English)
+ scenes.titlescene.patreon_button=Patreon Page
+ 
+-scenes.welcomescene.update_intro=Shattered Pixel Dungeon has been updated!
++scenes.welcomescene.update_intro=Ember Pixel Dungeon has been updated!
+ scenes.welcomescene.update_msg=v4.0 is arguably Shattered's biggest update yet! There's a massive new quest, a bunch of new in-game art, 6 new enchantments, and plenty smaller changes and adjustments.
+-scenes.welcomescene.patch_intro=Shattered Pixel Dungeon has been patched!
++scenes.welcomescene.patch_intro=Ember Pixel Dungeon has been patched!
+ scenes.welcomescene.patch_bugfixes=This patch contains bugfixes.
+ scenes.welcomescene.patch_translations=This patch contains translation updates.
+ scenes.welcomescene.patch_balance=This patch contains tweaks to game balance.
+ scenes.welcomescene.patch_msg=This patch also contains some small tweaks and performance improvements.
+-scenes.welcomescene.what_msg=It seems that your current saves are from a future version of Shattered Pixel Dungeon!\n\nTread with caution! Your saves may contain things which don't exist in this version, this could cause some very weird errors to occur.
++scenes.welcomescene.what_msg=It seems that your current saves are from a future version of Ember Pixel Dungeon!\n\nTread with caution! Your saves may contain things which don't exist in this version, this could cause some very weird errors to occur.
+ scenes.welcomescene.lang_warning_title=Incomplete Translation
+ scenes.welcomescene.lang_warning_msg=Some of the new content from this update has not yet been translated.\n\nSome phrases may be written in English.\n\nThe translation teams are working to resolve this and a full translation should be patched in soon.\n\nThank you for your patience.
+ scenes.welcomescene.continue=Continue
+ scenes.welcomescene.changelist=Changelist
+-scenes.welcomescene.save_warning=Shattered Pixel Dungeon was interrupted while trying to save your game data recently. Shattered has built-in protections against this, so your game data should be fine.\n\nThis usually happens when your device suddenly loses power, or if it terminates Shattered without letting it close properly. Battery saver features can often cause this on mobile devices. Restarting your device may also help if you are seeing this error frequently.
++scenes.welcomescene.save_warning=Ember Pixel Dungeon was interrupted while trying to save your game data recently. Shattered has built-in protections against this, so your game data should be fine.\n\nThis usually happens when your device suddenly loses power, or if it terminates Shattered without letting it close properly. Battery saver features can often cause this on mobile devices. Restarting your device may also help if you are seeing this error frequently.
+ scenes.welcomescene.controller_title=Controller Input
+ scenes.welcomescene.controller_body=Playing on a controller? Use the right stick to control an on-screen cursor.\n\nPress RT/R2 or the right stick to select with the cursor.
+ scenes.welcomescene.controller_okay=Okay
+\ No newline at end of file
+diff --git a/core/src/main/java/com/shatteredpixel/shatteredpixeldungeon/ShatteredPixelDungeon.java b/core/src/main/java/com/shatteredpixel/shatteredpixeldungeon/ShatteredPixelDungeon.java
+index 9e33268..e212af4 100644
+--- a/core/src/main/java/com/shatteredpixel/shatteredpixeldungeon/ShatteredPixelDungeon.java
++++ b/core/src/main/java/com/shatteredpixel/shatteredpixeldungeon/ShatteredPixelDungeon.java
+@@ -73,10 +73,10 @@ public class ShatteredPixelDungeon extends Game {
+ 
+ 	@Override
+ 	public void finish() {
+-		if (!DeviceCompat.isiOS()) {
++		if (!DeviceCompat.isiOS() && platform.ownsWindow()) {
+ 			super.finish();
+ 		} else {
+-			//can't exit on iOS (Apple guidelines), so just go to title screen
++			//can't exit on iOS (Apple guidelines), or a browser page, so just go to title screen
+ 			switchScene(TitleScene.class);
+ 		}
+ 	}
+diff --git a/core/src/main/java/com/shatteredpixel/shatteredpixeldungeon/scenes/GameName.java b/core/src/main/java/com/shatteredpixel/shatteredpixeldungeon/scenes/GameName.java
+new file mode 100644
+index 0000000..d6b100e
+--- /dev/null
++++ b/core/src/main/java/com/shatteredpixel/shatteredpixeldungeon/scenes/GameName.java
+@@ -0,0 +1,46 @@
++/*
++ * Pixel Dungeon
++ * Copyright (C) 2012-2015 Oleg Dolya
++ *
++ * Shattered Pixel Dungeon
++ * Copyright (C) 2014-2026 Evan Debenham
++ *
++ * This program is free software: you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation, either version 3 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program.  If not, see <http://www.gnu.org/licenses/>
++ */
++
++package com.shatteredpixel.shatteredpixeldungeon.scenes;
++
++import com.shatteredpixel.shatteredpixeldungeon.ui.RenderedTextBlock;
++import com.shatteredpixel.shatteredpixeldungeon.ui.Window;
++import com.watabou.noosa.Image;
++
++//This version is renamed, as Shattered Pixel Dungeon's author asks of other versions: the title and
++// welcome screens show the name as text in the game's pixel font in place of the banner artwork.
++// The credits on the About screen are unchanged.
++public class GameName {
++
++	public static final String NAME = "Ember Pixel Dungeon";
++
++	//adds the name, centered where the (hidden) banner would be
++	public static RenderedTextBlock add( PixelScene scene, Image banner, boolean landscape ){
++		RenderedTextBlock name = PixelScene.renderTextBlock(landscape ? "EMBER PIXEL DUNGEON" : "EMBER\nPIXEL DUNGEON", 16);
++		name.maxWidth((int)Math.max(banner.width(), 120));
++		name.align(RenderedTextBlock.CENTER_ALIGN);
++		name.hardlight(Window.TITLE_COLOR);
++		name.setPos(banner.x + (banner.width() - name.width()) / 2f, banner.y + (banner.height() - name.height()) / 2f);
++		PixelScene.align(name);
++		scene.add(name);
++		return name;
++	}
++}
+diff --git a/core/src/main/java/com/shatteredpixel/shatteredpixeldungeon/scenes/TitleScene.java b/core/src/main/java/com/shatteredpixel/shatteredpixeldungeon/scenes/TitleScene.java
+index 7c4cb12..45f9b36 100644
+--- a/core/src/main/java/com/shatteredpixel/shatteredpixeldungeon/scenes/TitleScene.java
++++ b/core/src/main/java/com/shatteredpixel/shatteredpixeldungeon/scenes/TitleScene.java
+@@ -39,6 +39,7 @@ import com.shatteredpixel.shatteredpixeldungeon.sprites.CharSprite;
+ import com.shatteredpixel.shatteredpixeldungeon.ui.ExitButton;
+ import com.shatteredpixel.shatteredpixeldungeon.ui.IconButton;
+ import com.shatteredpixel.shatteredpixeldungeon.ui.Icons;
++import com.shatteredpixel.shatteredpixeldungeon.ui.RenderedTextBlock;
+ import com.shatteredpixel.shatteredpixeldungeon.ui.StyledButton;
+ import com.shatteredpixel.shatteredpixeldungeon.ui.TitleBackground;
+ import com.shatteredpixel.shatteredpixeldungeon.ui.Window;
+@@ -67,6 +68,7 @@ public class TitleScene extends PixelScene {
+ 	private Fireball leftFB;
+ 	private Fireball rightFB;
+ 	private Image signs;
++	private RenderedTextBlock name;
+ 
+ 	private StyledButton btnPlay;
+ 	private StyledButton btnSupport;
+@@ -142,6 +144,10 @@ public class TitleScene extends PixelScene {
+ 		signs.y = title.y;
+ 		add( signs );
+ 
++		//renamed version: the name in place of the banner (see GameName)
++		title.visible = signs.visible = leftFB.visible = rightFB.visible = false;
++		name = GameName.add(this, title, landscape());
++
+ 		final Chrome.Type GREY_TR = Chrome.Type.GREY_BUTTON_TR;
+ 		
+ 		btnPlay = new StyledButton(GREY_TR, Messages.get(this, "enter")){
+@@ -242,6 +248,20 @@ public class TitleScene extends PixelScene {
+ 			btnAbout.setRect(btnSettings.right()+2, btnSettings.top(), btnSettings.width(), BTN_HEIGHT);
+ 		}
+ 
++		//no news without a news service (the browser build): its place goes to the other buttons
++		if (!News.supportsNews()){
++			remove(btnNews);
++			if (landscape()) {
++				btnChanges.setRect(btnJournal.right()+2, btnJournal.top(), btnRankings.width(), BTN_HEIGHT);
++				btnSettings.setRect(btnPlay.left(), btnRankings.bottom() + GAP, btnPlay.width(), BTN_HEIGHT);
++				btnAbout.setRect(btnSupport.left(), btnSettings.top(), btnSupport.width(), BTN_HEIGHT);
++			} else {
++				btnChanges.setRect(btnRankings.left(), btnRankings.bottom()+ GAP, btnRankings.width(), BTN_HEIGHT);
++				btnSettings.setRect(btnJournal.left(), btnChanges.top(), btnJournal.width(), BTN_HEIGHT);
++				btnAbout.setRect(btnPlay.left(), btnChanges.bottom()+GAP, btnPlay.width(), BTN_HEIGHT);
++			}
++		}
++
+ 		version = new BitmapText( "v" + Game.version, pixelFont);
+ 		version.measure();
+ 		version.hardlight( 0x888888 );
+@@ -289,7 +309,7 @@ public class TitleScene extends PixelScene {
+ 		};
+ 		add(fadeResetter);
+ 
+-		if (DeviceCompat.isDesktop()) {
++		if (DeviceCompat.isDesktop() && Game.platform.ownsWindow()) {
+ 			btnExit = new ExitButton();
+ 			btnExit.setPos( w - btnExit.width(), 0 );
+ 			add( btnExit );
+@@ -313,6 +333,7 @@ public class TitleScene extends PixelScene {
+ 		leftFB.am = alpha;
+ 		rightFB.am = alpha;
+ 		//signs.am = alpha; handles this itself
++		name.alpha(alpha);
+ 
+ 		btnPlay.enable(alpha != 0);
+ 		btnSupport.enable(alpha != 0);
+diff --git a/core/src/main/java/com/shatteredpixel/shatteredpixeldungeon/scenes/WelcomeScene.java b/core/src/main/java/com/shatteredpixel/shatteredpixeldungeon/scenes/WelcomeScene.java
+index afc1222..b7e1d4a 100644
+--- a/core/src/main/java/com/shatteredpixel/shatteredpixeldungeon/scenes/WelcomeScene.java
++++ b/core/src/main/java/com/shatteredpixel/shatteredpixeldungeon/scenes/WelcomeScene.java
+@@ -116,13 +116,6 @@ public class WelcomeScene extends PixelScene {
+ 
+ 		align(title);
+ 
+-		if (landscape()){
+-			placeTorch(title.x + 30, title.y + 35);
+-			placeTorch(title.x + title.width - 30, title.y + 35);
+-		} else {
+-			placeTorch(title.x + 16, title.y + 70);
+-			placeTorch(title.x + title.width - 16, title.y + 70);
+-		}
+ 
+ 		Image signs = new Image(BannerSprites.get( landscape() ? BannerSprites.Type.TITLE_GLOW_LAND : BannerSprites.Type.TITLE_GLOW_PORT)){
+ 			private float time = 0;
+@@ -142,6 +135,10 @@ public class WelcomeScene extends PixelScene {
+ 		signs.x = title.x + (title.width() - signs.width())/2f;
+ 		signs.y = title.y;
+ 		add( signs );
++
++		//renamed version: the name in place of the banner and its torches (see GameName)
++		title.visible = signs.visible = false;
++		GameName.add(this, title, landscape());
+ 		
+ 		StyledButton okay = new StyledButton(Chrome.Type.GREY_BUTTON_TR, Messages.get(this, "continue")){
+ 			@Override
+diff --git a/core/src/main/java/com/shatteredpixel/shatteredpixeldungeon/windows/WndSettings.java b/core/src/main/java/com/shatteredpixel/shatteredpixeldungeon/windows/WndSettings.java
+index 5510e64..0cb45d9 100644
+--- a/core/src/main/java/com/shatteredpixel/shatteredpixeldungeon/windows/WndSettings.java
++++ b/core/src/main/java/com/shatteredpixel/shatteredpixeldungeon/windows/WndSettings.java
+@@ -255,9 +255,9 @@ public class WndSettings extends WndTabbed {
+ 				chkFullscreen.checked(true);
+ 				chkFullscreen.enable(false);
+ 			}
+-			add(chkFullscreen);
++			if (Game.platform.ownsWindow()) add(chkFullscreen);
+ 
+-			if (DeviceCompat.isAndroid()) {
++			if (DeviceCompat.isAndroid() && Game.platform.ownsWindow()) {
+ 				chkLandscape = new CheckBox(Messages.get(this, "landscape")) {
+ 					@Override
+ 					protected void onClick() {
+@@ -325,8 +325,10 @@ public class WndSettings extends WndTabbed {
+ 
+ 			bottom = sep1.y + 1;
+ 
+-			chkFullscreen.setRect(0, bottom + GAP, width, BTN_HEIGHT);
+-			bottom = chkFullscreen.bottom();
++			if (chkFullscreen.parent != null) {
++				chkFullscreen.setRect(0, bottom + GAP, width, BTN_HEIGHT);
++				bottom = chkFullscreen.bottom();
++			}
+ 
+ 			if (chkLandscape != null) {
+ 				chkLandscape.setRect(0, bottom + GAP, width, BTN_HEIGHT);
+diff --git a/html/src/main/java/com/shatteredpixel/shatteredpixeldungeon/html/WebJS.java b/html/src/main/java/com/shatteredpixel/shatteredpixeldungeon/html/WebJS.java
+index abb9d13..b18998c 100644
+--- a/html/src/main/java/com/shatteredpixel/shatteredpixeldungeon/html/WebJS.java
++++ b/html/src/main/java/com/shatteredpixel/shatteredpixeldungeon/html/WebJS.java
+@@ -61,7 +61,7 @@ public class WebJS {
+ 			+ " || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);")
+ 	public static native boolean isIOS();
+ 
+-	@JSBody(script = "return navigator.language || (navigator.languages && navigator.languages[0]) || 'en';")
++	@JSBody(script = "return (window.spd && window.spd.language) || navigator.language || (navigator.languages && navigator.languages[0]) || 'en';")
+ 	public static native String browserLanguage();
+ 
+ 	@JSBody(script = "return /Android/i.test(navigator.userAgent);")
+diff --git a/html/src/main/java/com/shatteredpixel/shatteredpixeldungeon/html/WebPlatformSupport.java b/html/src/main/java/com/shatteredpixel/shatteredpixeldungeon/html/WebPlatformSupport.java
+index 1bbc082..79f3559 100644
+--- a/html/src/main/java/com/shatteredpixel/shatteredpixeldungeon/html/WebPlatformSupport.java
++++ b/html/src/main/java/com/shatteredpixel/shatteredpixeldungeon/html/WebPlatformSupport.java
+@@ -57,7 +57,13 @@ public class WebPlatformSupport extends PlatformSupport {
+ 
+ 	@Override
+ 	public boolean supportsFullScreen() {
+-		return WebJS.fullscreenSupported();
++		//the play page's button owns full screen
++		return false;
++	}
++
++	@Override
++	public boolean ownsWindow() {
++		return false;
+ 	}
+ 
+ 	@Override

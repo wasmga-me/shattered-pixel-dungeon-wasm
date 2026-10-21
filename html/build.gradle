@@ -177,7 +177,7 @@ def webMusic = layout.buildDirectory.dir('web-music')
 tasks.register('stageWebMusic', Sync) {
     from(new File(coreAssets, 'music'))
     // iOS ships mp3 copies of the ogg music; browsers without Vorbis support (Safari) use them
-    from(new File(project(':ios').projectDir, 'assets/music'))
+    from(rootProject.file('ios/assets/music'))
     into webMusic
 }
 
@@ -197,7 +197,7 @@ gdxTeaVM {
 
     js {
         targetFileName.set('spd.js')
-        optimization.set(OptimizationLevel.AGGRESSIVE)
+        optimization.set(OptimizationLevel.BALANCED)
         obfuscated.set(true)
         sourceMap.set(false)
         serverPort.set(8080)

@@ -3,8 +3,11 @@ include ':SPD-classes'
 include ':core'
 
 //platform modules
-include ':android'
-include ':ios'
+//web build (-PwebOnly): no Android or iOS
+if (!startParameter.projectProperties.containsKey('webOnly')) {
+    include ':android'
+    include ':ios'
+}
 include ':desktop'
 
 //service modules

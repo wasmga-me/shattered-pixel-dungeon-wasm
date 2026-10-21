@@ -4,7 +4,10 @@ buildscript {
         mavenCentral()
     }
     dependencies {
-        classpath 'com.android.tools.build:gradle:9.2.0'
+        //web build (-PwebOnly): no Android plugin, the build machine can't reach Google's maven
+        if (!gradle.startParameter.projectProperties.containsKey('webOnly')) {
+            classpath 'com.android.tools.build:gradle:9.2.0'
+        }
     }
 }
 
